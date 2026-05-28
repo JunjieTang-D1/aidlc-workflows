@@ -1,0 +1,16 @@
+[project]
+name = "aidlc-multi-agent-validator"
+version = "0.1.0"
+description = "Validates AI-DLC multi-agent coordination plans against extension rules"
+requires-python = ">=3.10"
+license = "MIT-0"
+
+[project.scripts]
+validate-multi-agent-plan = "validate_multi_agent_plan:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
