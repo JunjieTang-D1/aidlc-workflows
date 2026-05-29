@@ -247,13 +247,48 @@ Requirements:
 
 ---
 
+## Rule MULTI-AGENT-11: Speculative Branching for High-Uncertainty Units (Advisory)
+
+**Rule** *(advisory; never blocking)*: For units that are high-uncertainty *and* sit on the critical path, the orchestrator MAY dispatch N parallel variant attempts gated by Expected Value of Information (EVOI), and select the winner via Pareto front on `(quality, cost, latency)` instead of one-shot-then-blind-retry. This rule is non-blocking even under **Full** enforcement — it is a budgeted optimization, not a safety constraint.
+
+This rule extends MULTI-AGENT-08 (cost-benefit). MULTI-AGENT-08 governs whether to parallelize *across units*; MULTI-AGENT-11 governs whether to parallelize *within a single high-stakes unit*. The two are independent — a project may run units sequentially overall while still forking a single critical unit speculatively.
+
+When this rule applies:
+- A unit's recorded historical failure rate is high (≥ 0.5) OR
+- A unit has sparse acceptance criteria (≤ 1 explicit criterion) AND is on the critical path OR
+- A unit's combined uncertainty score (failure history + complexity + criticality + ambiguity) crosses a documented `min_uncertainty` floor
+
+When the EVOI gate fires:
+- Dispatch N branches (typically 3) with explicit variant labels (e.g., `conservative`, `balanced`, `aggressive`) — each branch gets a distinct rewrite preamble
+- Each branch operates in an isolated workspace (MULTI-AGENT-04 still applies)
+- Branches share no mutable state (MULTI-AGENT-06 still applies)
+- After all branches complete, select the winner via Pareto front with min-quality and per-branch budget cap; record every branch's outcome (winner *and* losers) so future signals reflect both successful and failed alternatives
+
+EVOI formula (deterministic, no LLM call):
+
+```
+EVOI = uncertainty_total · expected_improvement_usd − branch_cost_total
+fork ⇔ EVOI > 0  AND  uncertainty_total ≥ min_uncertainty  AND  budget_remaining ≥ branch_cost_total
+```
+
+**Recommended Verification** *(advisory)*:
+- The orchestrator documents which units crossed the EVOI threshold and the gate decision (fork or skip) per unit, with the recorded reason
+- Forked units use isolated workspaces (one per branch) and do not violate MULTI-AGENT-01/04/06
+- Every branch outcome — winner *and* losers — is logged in `aidlc-docs/audit.md` with quality, cost, and duration; the winner is committed and losers are dropped (rollback granularity: one branch)
+- Branch cost is bounded — total speculative spend per unit is capped (e.g., `n_branches × per_branch_cost ≤ unit_budget`); breaches are logged
+- A reference implementation is available in `scripts/multi-agent-validator/speculative_branching.py`; projects MAY adopt it or implement their own
+
+This rule is a **strict opt-in** beyond the standard extension opt-in: the orchestrator (human or coordinating agent) must explicitly enable it for a project. The default behavior even under **Full** enforcement is single-agent-per-unit dispatch.
+
+---
+
 ## Enforcement Integration
 
 These rules are cross-cutting constraints that apply to the following AI-DLC stages:
 
 | Stage | Applicable Rules | Enforcement |
 |---|---|---|
-| Workflow Planning | MULTI-AGENT-01, 02, 03, 04, 05, 08, 09, 10 | Parallel execution plan must include ownership, DAG, contracts, isolation, timeouts, cost-benefit, communication, and recovery |
+| Workflow Planning | MULTI-AGENT-01, 02, 03, 04, 05, 08, 09, 10, 11 | Parallel execution plan must include ownership, DAG, contracts, isolation, timeouts, cost-benefit, communication, recovery, and (advisory) speculative-branching policy |
 | Units Generation | MULTI-AGENT-01, 02 | Each generated unit must have declared file ownership and dependency edges |
 | Functional Design | MULTI-AGENT-03 | Cross-unit interface contracts must be defined and frozen before parallel design begins |
 | Code Generation | MULTI-AGENT-04, 06 | Each agent operates in isolated workspace with no shared mutable state |
